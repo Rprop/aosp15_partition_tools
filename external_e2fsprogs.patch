@@ -1,0 +1,57 @@
+diff --git a/contrib/android/Android.bp b/contrib/android/Android.bp
+index d38e0626..f75db7aa 100644
+--- a/contrib/android/Android.bp
++++ b/contrib/android/Android.bp
+@@ -70,10 +70,16 @@ cc_binary {
+     defaults: ["e2fsprogs-defaults"],
+ 
+     srcs: ["ext2simg.c"],
+-    shared_libs: [
++    static_libs: [
+         "libext2fs",
+         "libext2_com_err",
++        "libbase",
+         "libsparse",
+         "libz",
+     ],
++    target: {
++        windows: {
++            enabled: true,
++        },
++    },
+ }
+diff --git a/contrib/android/ext2simg.c b/contrib/android/ext2simg.c
+index 2bf76b91..45730b4c 100644
+--- a/contrib/android/ext2simg.c
++++ b/contrib/android/ext2simg.c
+@@ -14,6 +14,9 @@
+  * limitations under the License.
+  */
+ 
++#ifdef WIN32
++#define HAVE_SYS_STAT_H 1
++#endif
+ #include <libgen.h>
+ #include <unistd.h>
+ #include <sys/types.h>
+@@ -50,7 +53,7 @@ static void usage(char *path)
+ {
+ 	char *progname = basename(path);
+ 
+-	fprintf(stderr, "%s [ options ] <image or block device> <output image>\n"
++	fprintf(stderr, "Modified version from android-15.0.0_r25 built by Rprop (https://github.com/Rprop)\n\n%s [ options ] <image or block device> <output image>\n"
+ 			"  -c include CRC block\n"
+ 			"  -z gzip output\n"
+ 			"  -S don't use sparse output format\n", progname);
+@@ -124,7 +127,11 @@ static struct sparse_file *ext_to_sparse(const char *in_file)
+ 	int64_t chunk_start = -1;
+ 	blk_t fs_blks, cur_blk;
+ 
++#ifdef WIN32
++	retval = ext2fs_open(in_file, 0, 0, 0, windows_io_manager, &fs);
++#else
+ 	retval = ext2fs_open(in_file, 0, 0, 0, unix_io_manager, &fs);
++#endif
+ 	if (retval)
+ 		ext2fs_fatal(retval, "while reading %s", in_file);
+ 

@@ -1,0 +1,148 @@
+diff --git a/fs_mgr/liblp/images.cpp b/fs_mgr/liblp/images.cpp
+index a2dbb1052..d432173a9 100644
+--- a/fs_mgr/liblp/images.cpp
++++ b/fs_mgr/liblp/images.cpp
+@@ -156,6 +156,18 @@ bool WriteToImageFile(const std::string& file, const LpMetadata& input) {
+ #endif
+     const auto err = rename(tmpfile.path, file.c_str());
+     if (err != 0) {
++#if defined(_WIN32)
++        const int fd = tmpfile.release();
++        if (fd != -1) {
++            // close before rename
++            close(fd);
++            if (rename(tmpfile.path, file.c_str()) == 0) {
++                // `tmpfile.path` no longer valid
++                tmpfile.DoNotRemove();
++                return true;
++            }
++        }
++#endif
+         PLOG(ERROR) << "Failed to rename tmp geometry file " << tmpfile.path << " to " << file;
+         return false;
+     }
+diff --git a/fs_mgr/liblp/reader.cpp b/fs_mgr/liblp/reader.cpp
+index 24ccc0f9d..78659429a 100644
+--- a/fs_mgr/liblp/reader.cpp
++++ b/fs_mgr/liblp/reader.cpp
+@@ -438,7 +438,7 @@ bool AdjustMetadataForSlot(LpMetadata* metadata, uint32_t slot_number) {
+ 
+ std::unique_ptr<LpMetadata> ReadMetadata(const IPartitionOpener& opener,
+                                          const std::string& super_partition, uint32_t slot_number) {
+-    android::base::unique_fd fd = opener.Open(super_partition, O_RDONLY);
++    android::base::unique_fd fd = opener.Open(super_partition, O_RDONLY | O_BINARY);
+     if (fd < 0) {
+         PERROR << __PRETTY_FUNCTION__ << " open failed: " << super_partition;
+         return nullptr;
+diff --git a/fs_mgr/liblp/writer.cpp b/fs_mgr/liblp/writer.cpp
+index 2708efa15..6e3cf8c15 100644
+--- a/fs_mgr/liblp/writer.cpp
++++ b/fs_mgr/liblp/writer.cpp
+@@ -247,7 +247,7 @@ static const int O_SYNC = 0;
+ 
+ bool FlashPartitionTable(const IPartitionOpener& opener, const std::string& super_partition,
+                          const LpMetadata& metadata) {
+-    android::base::unique_fd fd = opener.Open(super_partition, O_RDWR | O_SYNC);
++    android::base::unique_fd fd = opener.Open(super_partition, O_RDWR | O_SYNC | O_BINARY);
+     if (fd < 0) {
+         PERROR << __PRETTY_FUNCTION__ << " open failed: " << super_partition;
+         return false;
+@@ -323,7 +323,7 @@ static bool CompareMetadata(const LpMetadata& a, const LpMetadata& b) {
+ bool UpdatePartitionTable(const IPartitionOpener& opener, const std::string& super_partition,
+                           const LpMetadata& metadata, uint32_t slot_number,
+                           const std::function<bool(int, const std::string&)>& writer) {
+-    android::base::unique_fd fd = opener.Open(super_partition, O_RDWR | O_SYNC);
++    android::base::unique_fd fd = opener.Open(super_partition, O_RDWR | O_SYNC | O_BINARY);
+     if (fd < 0) {
+         PERROR << __PRETTY_FUNCTION__ << " open failed: " << super_partition;
+         return false;
+diff --git a/libsparse/Android.bp b/libsparse/Android.bp
+index 44907a1f0..267ee8208 100644
+--- a/libsparse/Android.bp
++++ b/libsparse/Android.bp
+@@ -58,6 +58,9 @@ cc_binary_host {
+         darwin: {
+             enabled: true,
+         },
++        windows: {
++            enabled: true,
++        },
+     },
+ }
+ 
+@@ -71,6 +74,11 @@ cc_binary_host {
+     ],
+ 
+     cflags: ["-Werror"],
++    target: {
++        windows: {
++            enabled: true,
++        },
++    },
+ }
+ 
+ cc_binary_host {
+@@ -83,6 +91,11 @@ cc_binary_host {
+     ],
+ 
+     cflags: ["-Werror"],
++    target: {
++        windows: {
++            enabled: true,
++        },
++    },
+ }
+ 
+ python_binary_host {
+diff --git a/libsparse/append2simg.cpp b/libsparse/append2simg.cpp
+index d3a43a885..457cf9f09 100644
+--- a/libsparse/append2simg.cpp
++++ b/libsparse/append2simg.cpp
+@@ -41,7 +41,7 @@
+ #endif
+ 
+ void usage() {
+-  fprintf(stderr, "Usage: append2simg <output> <input>\n");
++  fprintf(stderr, "Modified version from android-15.0.0_r25 built by Rprop (https://github.com/Rprop)\n\nUsage: append2simg <output> <input>\n");
+ }
+ 
+ int main(int argc, char* argv[]) {
+@@ -67,7 +67,12 @@ int main(int argc, char* argv[]) {
+     exit(EXIT_FAILURE);
+   }
+ 
++#ifdef WIN32
++  tmp_path = (char*)malloc(PATH_MAX);
++  ret = snprintf(tmp_path, PATH_MAX, "%s.append2simg", output_path);
++#else
+   ret = asprintf(&tmp_path, "%s.append2simg", output_path);
++#endif
+   if (ret < 0) {
+     fprintf(stderr, "Couldn't allocate filename\n");
+     exit(EXIT_FAILURE);
+diff --git a/libsparse/img2simg.cpp b/libsparse/img2simg.cpp
+index c390506af..891ca87b6 100644
+--- a/libsparse/img2simg.cpp
++++ b/libsparse/img2simg.cpp
+@@ -38,7 +38,7 @@
+ #endif
+ 
+ void usage() {
+-  fprintf(stderr, "Usage: img2simg [-s] <raw_image_file> <sparse_image_file> [<block_size>]\n");
++  fprintf(stderr, "Modified version from android-15.0.0_r25 built by Rprop (https://github.com/Rprop)\n\nUsage: img2simg [-s] <raw_image_file> <sparse_image_file> [<block_size>]\n");
+ }
+ 
+ int main(int argc, char* argv[]) {
+diff --git a/libsparse/simg2img.cpp b/libsparse/simg2img.cpp
+index 2301a83d0..04244bacd 100644
+--- a/libsparse/simg2img.cpp
++++ b/libsparse/simg2img.cpp
+@@ -30,7 +30,7 @@
+ #endif
+ 
+ void usage() {
+-  fprintf(stderr, "Usage: simg2img <sparse_image_files> <raw_image_file>\n");
++  fprintf(stderr, "Modified version from android-15.0.0_r25 built by Rprop (https://github.com/Rprop)\n\nUsage: simg2img <sparse_image_files> <raw_image_file>\n");
+ }
+ 
+ int main(int argc, char* argv[]) {
